@@ -39,6 +39,77 @@ def detect_date_formats(column):
     
     return formats_detected
 
+# Fonction pour rejouer une transformation
+def replay_transformation(df, transformation):
+    """
+    Rejoue une transformation sur un DataFrame.
+    
+    Args:
+        df: DataFrame pandas à transformer
+        transformation: Dictionnaire contenant les infos de la transformation
+        
+    Returns:
+        DataFrame modifié
+    """
+    df_copy = df.copy()  # Toujours travailler sur une copie
+    
+    trans_type = transformation['type']
+    
+    # Remplacement NaN colonnes numériques
+    if trans_type == 'fill_na_numeric':
+        col = transformation['column']
+        strategy = transformation['strategy']
+        
+        if strategy == 'médiane':
+            df_copy[col].fillna(df_copy[col].median(), inplace=True)
+        elif strategy == 'moyenne':
+            df_copy[col].fillna(df_copy[col].mean(), inplace=True)
+        elif strategy == 'valeur fixe':
+            df_copy[col].fillna(transformation['fill_value'], inplace=True)
+        elif strategy == 'supprimer les lignes':
+            df_copy = df_copy.dropna(subset=[col])
+    
+    # Remplacement NaN colonnes catégorielles
+    elif trans_type == 'fill_na_categorical':
+        col = transformation['column']
+        strategy = transformation['strategy']
+        
+        if strategy == 'valeur fixe':
+            df_copy[col].fillna(transformation['fill_value'], inplace=True)
+        elif strategy == 'mode (valeur la plus fréquente)':
+            mode_val = df_copy[col].mode()[0]
+            df_copy[col].fillna(mode_val, inplace=True)
+        elif strategy == 'supprimer les lignes':
+            df_copy = df_copy.dropna(subset=[col])
+    
+    # Conversion de types
+    elif trans_type == 'convert_type':
+        col = transformation['column']
+        target = transformation['target_type']
+        
+        if target == "Numérique (float)":
+            df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce')
+        elif target == "Numérique (int)":
+            df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').astype('Int64')
+        elif target == "Texte (string)":
+            df_copy[col] = df_copy[col].astype(str)
+        elif target == "Date/Heure":
+            df_copy[col] = pd.to_datetime(df_copy[col], errors='coerce')
+    
+    # Suppression doublons
+    elif trans_type == 'drop_duplicates':
+        keep = transformation['keep']
+        
+        if keep == 'première':
+            df_copy = df_copy.drop_duplicates(keep='first')
+        elif keep == 'dernière':
+            df_copy = df_copy.drop_duplicates(keep='last')
+        elif keep == 'aucune (supprimer toutes)':
+            df_copy = df_copy.drop_duplicates(keep=False)
+    
+    return df_copy
+
+
 st.set_page_config(
     page_title="CleanSheet App",
     page_icon="📑",
@@ -52,6 +123,37 @@ st.markdown("Uploadez votre fichier pour commencer l'analyse et le nettoyage.")
 
 st.sidebar.header("Options")
 
+if 'transformations_applied' in st.session_state and len(st.session_state.transformations_applied) > 0:
+    st.sidebar.subheader("Historique des transformations")
+    for i, transformation in enumerate(st.session_state.transformations_applied, start=1):
+        st.sidebar.write(f"{i}. {transformation['description']}")
+    if st.sidebar.button("↩️ Annuler dernière transformation"):
+        # Retirer la dernière transformation
+        st.session_state.transformations_applied.pop()
+        
+        # Repartir du DataFrame original
+        df_rebuilt = st.session_state.df_original.copy()
+        
+        # Rejouer toutes les transformations restantes
+        for transformation in st.session_state.transformations_applied:
+            df_rebuilt = replay_transformation(df_rebuilt, transformation)
+        
+        # Mettre à jour le DataFrame de travail
+        st.session_state.df_working = df_rebuilt
+        
+        st.sidebar.success("✅ Transformation annulée")
+        st.rerun()
+
+        # Bouton pour tout recommencer
+    if st.sidebar.button("🔄 Tout recommencer"):
+        # Repartir du DataFrame original
+        st.session_state.df_working = st.session_state.df_original.copy()
+        
+        # Vider l'historique
+        st.session_state.transformations_applied = []
+        
+        st.sidebar.success("✅ Données réinitialisées")
+        st.rerun()
 
 uploaded_file = st.file_uploader(
     "Choisissez un fichier CSV ou Excel",
@@ -60,16 +162,28 @@ uploaded_file = st.file_uploader(
 )
 
 
-if uploaded_file is not None:
+if uploaded_file is not None or 'df_working' in st.session_state:
     try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        elif uploaded_file.name.endswith('.json'):
-            df = pd.read_json(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
+        # Chargement du fichier seulement si nouveau ou pas en session
+        if uploaded_file is not None and ('df_original' not in st.session_state or st.session_state.get('last_file') != uploaded_file.name):
+            if uploaded_file.name.endswith('.csv'):
+                df_loaded = pd.read_csv(uploaded_file)
+            elif uploaded_file.name.endswith('.json'):
+                df_loaded = pd.read_json(uploaded_file)
+            else:
+                df_loaded = pd.read_excel(uploaded_file)
+            
+            # Stockage dans session_state
+            st.session_state.df_original = df_loaded.copy()  
+            st.session_state.df_working = df_loaded.copy()   
+            st.session_state.last_file = uploaded_file.name
+            st.session_state.transformations_applied = []    
+            
+            st.success(f"✅ Fichier chargé : {uploaded_file.name}")
         
-        st.success(f"✅ Fichier chargé : {uploaded_file.name}")
+        # Récupération du DataFrame de travail (TOUJOURS)
+        if 'df_working' in st.session_state:
+            df = st.session_state.df_working
         
         st.subheader("📊 Aperçu des données")
         col1, col2, col3 = st.columns(3)
@@ -79,10 +193,46 @@ if uploaded_file is not None:
             st.metric("Nombre de colonnes", len(df.columns))
         with col3:
             st.metric("Taille mémoire", f"{df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-        
         # Affichage du DataFrame
         st.dataframe(df, use_container_width=True, height=400)
         
+
+        # Comparaison avant/après si des transformations ont été appliquées
+        if 'transformations_applied' in st.session_state and len(st.session_state.transformations_applied) > 0:
+            st.info("**📊 Impact des transformations :**")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                original_rows = len(st.session_state.df_original)
+                current_rows = len(df)
+                delta_rows = current_rows - original_rows
+                
+                st.metric(
+                    "Lignes", 
+                    f"{current_rows:,}", 
+                    delta=f"{delta_rows:+,}" if delta_rows != 0 else "0",
+                    delta_color="normal"
+                )
+            
+            with col2:
+                original_nan = st.session_state.df_original.isnull().sum().sum()
+                current_nan = df.isnull().sum().sum()
+                delta_nan = current_nan - original_nan
+                
+                st.metric(
+                    "Valeurs manquantes", 
+                    f"{current_nan:,}", 
+                    delta=f"{delta_nan:+,}" if delta_nan != 0 else "0",
+                    delta_color="inverse"
+                )
+            
+            with col3:
+                st.metric(
+                    "Transformations", 
+                    len(st.session_state.transformations_applied),
+                    delta=None
+                )
        
         st.subheader("🔍 Profiling rapide")
         
@@ -226,6 +376,193 @@ if uploaded_file is not None:
             st.info("Aucune colonne numérique à visualiser")
 
         
+# Section de transformations interactives
+        st.subheader("🔧 Transformations de données")
+        
+        # Tabs pour organiser les différents types de transformations
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "Valeurs manquantes", 
+            "Conversion de types", 
+            "Doublons",
+            "Filtrage"
+        ])
+        
+        # TAB 1 : Gestion des valeurs manquantes
+        with tab1:
+            st.write("**Remplacer les valeurs manquantes**")
+            
+            cols_with_na = [col for col in df.columns if df[col].isnull().sum() > 0]
+            
+            if len(cols_with_na) > 0:
+                col_to_fix = st.selectbox(
+                    "Choisir une colonne",
+                    cols_with_na,
+                    key="na_col_select"
+                )
+                
+                na_count = df[col_to_fix].isnull().sum()
+                st.info(f"Colonne **{col_to_fix}** : {na_count} valeurs manquantes ({na_count/len(df)*100:.1f}%)")
+                
+                # Options selon le type de colonne
+                if df[col_to_fix].dtype in ['int64', 'float64']:
+                    strategy = st.radio(
+                        "Stratégie de remplacement",
+                        ["Médiane", "Moyenne", "Valeur fixe", "Supprimer les lignes"],
+                        key="na_strategy"
+                    )
+                    
+                    if strategy == "Valeur fixe":
+                        fill_value = st.number_input("Valeur de remplacement", value=0.0)
+                    
+                    if st.button("Appliquer", key="apply_na"):
+                        df_preview = st.session_state.df_working.copy()
+                        
+                        if strategy == "Médiane":
+                            df_preview[col_to_fix].fillna(df_preview[col_to_fix].median(), inplace=True)
+                            st.success(f"✅ Valeurs manquantes remplacées par la médiane ({df_preview[col_to_fix].median():.2f})")
+                        elif strategy == "Moyenne":
+                            df_preview[col_to_fix].fillna(df_preview[col_to_fix].mean(), inplace=True)
+                            st.success(f"✅ Valeurs manquantes remplacées par la moyenne ({df_preview[col_to_fix].mean():.2f})")
+                        elif strategy == "Valeur fixe":
+                            df_preview[col_to_fix].fillna(fill_value, inplace=True)
+                            st.success(f"✅ Valeurs manquantes remplacées par {fill_value}")
+                        elif strategy == "Supprimer les lignes":
+                            df_preview = df_preview.dropna(subset=[col_to_fix])
+                            st.success(f"✅ {na_count} lignes supprimées")
+                        
+                        # Mise à jour du DataFrame de travail
+                        st.session_state.df_working = df_preview
+                        st.session_state.transformations_applied.append({
+                        'type': 'fill_na_numeric',
+                        'column': col_to_fix,
+                        'strategy': strategy.lower(),  # "médiane" ou "moyenne" ou "valeur fixe"
+                        'fill_value': fill_value if strategy == "Valeur fixe" else None,
+                        'description': f"NaN remplacés dans '{col_to_fix}' par {strategy}"
+                        })
+                        st.rerun()
+                
+                else:  # Colonnes non-numériques
+                    strategy = st.radio(
+                        "Stratégie de remplacement",
+                        ["Valeur fixe", "Mode (valeur la plus fréquente)", "Supprimer les lignes"],
+                        key="na_strategy_cat"
+                    )
+                    
+                    if strategy == "Valeur fixe":
+                        fill_value = st.text_input("Valeur de remplacement", value="Inconnu")
+                    
+                    if st.button("Appliquer", key="apply_na_cat"):
+                        df_preview = st.session_state.df_working.copy()
+                        
+                        if strategy == "Valeur fixe":
+                            df_preview[col_to_fix].fillna(fill_value, inplace=True)
+                            st.success(f"✅ Valeurs manquantes remplacées par '{fill_value}'")
+                        elif strategy == "Mode (valeur la plus fréquente)":
+                            mode_val = df_preview[col_to_fix].mode()[0]
+                            df_preview[col_to_fix].fillna(mode_val, inplace=True)
+                            st.success(f"✅ Valeurs manquantes remplacées par le mode ('{mode_val}')")
+                        elif strategy == "Supprimer les lignes":
+                            df_preview = df_preview.dropna(subset=[col_to_fix])
+                            st.success(f"✅ {na_count} lignes supprimées")
+                        
+                        st.session_state.df_working = df_preview
+                        st.session_state.transformations_applied.append({
+                        'type': 'fill_na_categorical',
+                        'column': col_to_fix,
+                        'strategy': strategy.lower(),
+                        'fill_value': fill_value if strategy == "Valeur fixe" else None,
+                        'description': f"NaN remplacés dans '{col_to_fix}' par {strategy}"
+                        })
+                        st.rerun()
+            else:
+                st.success("✅ Aucune valeur manquante à traiter")
+        
+        # TAB 2 : Conversion de types
+        with tab2:
+            st.write("**Convertir le type d'une colonne**")
+            
+            col_to_convert = st.selectbox(
+                "Choisir une colonne",
+                df.columns.tolist(),
+                key="convert_col_select"
+            )
+            
+            current_type = df[col_to_convert].dtype
+            st.info(f"Type actuel : **{current_type}**")
+            
+            target_type = st.selectbox(
+                "Convertir en",
+                ["Numérique (float)", "Numérique (int)", "Texte (string)", "Date/Heure"],
+                key="target_type"
+            )
+            
+            if st.button("Appliquer conversion", key="apply_convert"):
+                df_preview = st.session_state.df_working.copy()
+                
+                try:
+                    if target_type == "Numérique (float)":
+                        df_preview[col_to_convert] = pd.to_numeric(df_preview[col_to_convert], errors='coerce')
+                        st.success(f"✅ Colonne '{col_to_convert}' convertie en float")
+                    elif target_type == "Numérique (int)":
+                        df_preview[col_to_convert] = pd.to_numeric(df_preview[col_to_convert], errors='coerce').astype('Int64')
+                        st.success(f"✅ Colonne '{col_to_convert}' convertie en int")
+                    elif target_type == "Texte (string)":
+                        df_preview[col_to_convert] = df_preview[col_to_convert].astype(str)
+                        st.success(f"✅ Colonne '{col_to_convert}' convertie en string")
+                    elif target_type == "Date/Heure":
+                        df_preview[col_to_convert] = pd.to_datetime(df_preview[col_to_convert], errors='coerce')
+                        st.success(f"✅ Colonne '{col_to_convert}' convertie en datetime")
+                    
+                    st.session_state.df_working = df_preview
+                    st.session_state.transformations_applied.append({
+                    'type': 'convert_type',
+                    'column': col_to_convert,
+                    'target_type': target_type,
+                    'description': f"Conversion '{col_to_convert}' en {target_type}"})
+                    st.rerun()
+                
+                except Exception as e:
+                    st.error(f"❌ Erreur lors de la conversion : {str(e)}")
+        
+        # TAB 3 : Gestion des doublons
+        with tab3:
+            st.write("**Supprimer les lignes dupliquées**")
+            
+            dup_count = df.duplicated().sum()
+            
+            if dup_count > 0:
+                st.warning(f"⚠️ {dup_count} ligne(s) dupliquée(s) détectée(s)")
+                
+                keep_strategy = st.radio(
+                    "Quelle occurrence garder ?",
+                    ["Première", "Dernière", "Aucune (supprimer toutes)"],
+                    key="dup_strategy"
+                )
+                
+                if st.button("Supprimer les doublons", key="apply_dup"):
+                    df_preview = st.session_state.df_working.copy()
+                    
+                    if keep_strategy == "Première":
+                        df_preview = df_preview.drop_duplicates(keep='first')
+                    elif keep_strategy == "Dernière":
+                        df_preview = df_preview.drop_duplicates(keep='last')
+                    else:
+                        df_preview = df_preview.drop_duplicates(keep=False)
+                    
+                    st.success(f"✅ {dup_count} doublon(s) supprimé(s)")
+                    st.session_state.df_working = df_preview
+                    st.session_state.transformations_applied.append({
+                    'type': 'drop_duplicates',
+                    'keep': keep_strategy.lower(),
+                    'description': f"Doublons supprimés (stratégie: {keep_strategy})"})
+                    st.rerun()
+            else:
+                st.success("✅ Aucun doublon détecté")
+        
+        with tab4:
+            st.write("**Filtrer les données**")
+            st.info("🚧 Fonctionnalité à venir dans la prochaine session")
+
 
 # Section de suggestions automatiques
         st.subheader("💡 Suggestions de nettoyage")
