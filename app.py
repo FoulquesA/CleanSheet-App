@@ -29,6 +29,179 @@ from utils.templates_manager import (
     load_template_data,
     delete_template
 )
+from utils.translations import get_text, TRANSLATIONS
+
+
+# Mapping pour normaliser les stratégies stockées vers des clés de traduction
+STRATEGY_MAPPING = {
+    # Fill NA strategies - normalization vers clés anglaises
+    'médiane': 'median',
+    'median': 'median',
+    'moyenne': 'mean',
+    'mean': 'mean',
+    'valeur fixe': 'fixed',
+    'fixed value': 'fixed',
+    'supprimer les lignes': 'drop',
+    'drop rows': 'drop',
+    'mode': 'mode',
+    # Duplicate strategies
+    'première': 'first',
+    'first': 'first',
+    'dernière': 'last',
+    'last': 'last',
+    'derniere': 'last',
+}
+
+
+def get_transformation_description(transformation, lang):
+    """
+    Génère dynamiquement la description d'une transformation dans la langue donnée.
+    Utilise les clés de traduction existantes dans translations_COMPLETE.py
+    """
+    trans_type = transformation.get('type')
+    
+    if trans_type == 'fill_na_numeric' or trans_type == 'fill_na_categorical':
+        col = transformation['column']
+        strategy_raw = transformation.get('strategy', '').lower()
+        strategy_key = STRATEGY_MAPPING.get(strategy_raw, strategy_raw)
+        
+        # Utiliser les clés history_fill_na_* du fichier de traductions
+        translation_key = f'history_fill_na_{strategy_key}'
+        description_template = get_text(translation_key, lang)
+        
+        # Si la clé existe et contient '{}', l'utiliser
+        if '{}' in description_template:
+            return description_template.format(col)
+        else:
+            # Fallback si la clé n'existe pas
+            strategy_text = get_text(f'trans_missing_{strategy_key}', lang)
+            if lang == 'fr':
+                return f"NaN remplacés dans '{col}' par {strategy_text}"
+            else:
+                return f"NaN replaced in '{col}' with {strategy_text}"
+    
+    elif trans_type == 'convert_type':
+        col = transformation['column']
+        target = transformation['target_type']
+        
+        # Utiliser la clé history_convert_type si elle existe
+        description_template = get_text('history_convert_type', lang)
+        if '{}' in description_template:
+            return description_template.format(col, target)
+        else:
+            if lang == 'fr':
+                return f"Conversion '{col}' en {target}"
+            else:
+                return f"Conversion '{col}' to {target}"
+    
+    elif trans_type == 'drop_duplicates':
+        keep_raw = transformation.get('keep', '').lower()
+        keep_key = STRATEGY_MAPPING.get(keep_raw, keep_raw)
+        
+        # Utiliser les clés history_dup_* 
+        description_template = get_text(f'history_dup_{keep_key}', lang)
+        
+        if description_template and description_template != f'history_dup_{keep_key}':
+            # La clé existe, l'utiliser directement
+            return description_template
+        else:
+            # Fallback
+            keep_text = get_text(f'trans_dup_{keep_key}', lang)
+            if lang == 'fr':
+                return f"Doublons supprimés (stratégie: {keep_text})"
+            else:
+                return f"Duplicates removed (strategy: {keep_text})"
+    
+    elif trans_type == 'filter_rows':
+        # Utiliser la clé history_filter
+        desc = transformation.get('description', '')
+        
+        # Extraire les conditions de la description stockée
+        if 'Filtrage appliqué' in desc or 'Filter applied' in desc or 'Filtering applied' in desc:
+            if ':' in desc:
+                conditions = desc.split(':', 1)[1].strip()
+                # Convertir ET/AND selon la langue
+                if lang == 'en':
+                    conditions = conditions.replace(' ET ', ' AND ')
+                else:
+                    conditions = conditions.replace(' AND ', ' ET ')
+                
+                return get_text('history_filter', lang).format(conditions)
+        
+        return desc
+    
+    elif trans_type == 'text_cleaning':
+        col = transformation.get('column', '')
+        operations = transformation.get('operations', [])
+        
+        # Mapper les opérations vers les clés de traduction
+        ops_keys_map = {
+            'minuscules': 'lower',
+            'lowercase': 'lower',
+            'majuscules': 'upper', 
+            'uppercase': 'upper',
+            'espaces': 'trim',
+            'trim spaces': 'trim',
+            'accents': 'special',
+            'remove accents': 'special',
+            'ponctuation': 'special',
+            'remove punctuation': 'special',
+            'title case': 'title',
+            'casse titre': 'title'
+        }
+        
+        # Si une seule opération, utiliser les clés history_text_*
+        if len(operations) == 1:
+            op = operations[0].lower()
+            op_key = ops_keys_map.get(op, op)
+            translation_key = f'history_text_{op_key}'
+            description_template = get_text(translation_key, lang)
+            
+            if '{}' in description_template:
+                return description_template.format(col)
+        
+        # Sinon, fallback générique
+        if lang == 'fr':
+            ops_text = ', '.join(operations)
+            return f"Nettoyage texte '{col}': {ops_text}"
+        else:
+            ops_text = ', '.join(operations)
+            return f"Text cleaning '{col}': {ops_text}"
+    
+    elif trans_type == 'extract_pattern':
+        col = transformation.get('column', '')
+        new_col = transformation.get('new_column', '')
+        
+        if lang == 'fr':
+            return f"Extraction pattern de '{col}' vers '{new_col}'"
+        else:
+            return f"Pattern extraction from '{col}' to '{new_col}'"
+    
+    elif trans_type == 'split_column':
+        col = transformation.get('column', '')
+        
+        if lang == 'fr':
+            return f"Division colonne '{col}'"
+        else:
+            return f"Column split '{col}'"
+    
+    elif trans_type == 'find_replace':
+        col = transformation.get('column', '')
+        old_val = transformation.get('old_value', '')
+        new_val = transformation.get('new_value', '')
+        
+        # Utiliser history_text_replace si disponible
+        description_template = get_text('history_text_replace', lang)
+        if '{}' in description_template and description_template.count('{}') >= 3:
+            return description_template.format(old_val, new_val, col)
+        else:
+            if lang == 'fr':
+                return f"Rechercher/Remplacer dans '{col}'"
+            else:
+                return f"Find/Replace in '{col}'"
+    
+    # Fallback : utiliser la description stockée
+    return transformation.get('description', 'Transformation')
 
 
 st.set_page_config(
@@ -37,35 +210,57 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📑 CleanSheet - Outil de nettoyage de données")
-st.markdown("Uploadez votre fichier pour commencer l'analyse et le nettoyage.")
+# Initialiser la langue
+if 'language' not in st.session_state:
+    st.session_state.language = 'fr'
+lang = st.session_state.language
+
+st.title(get_text('app_title', lang))
+st.markdown(get_text('app_subtitle', lang))
+
+# Message d'aide global
+with st.expander(get_text('help_title', lang), expanded=False):
+    st.markdown(get_text('help_content', lang))
 
 st.sidebar.header("Options")
 
+# Sélecteur de langue
+language = st.sidebar.selectbox(
+    "🌍 Langue / Language",
+    options=['fr', 'en'],
+    format_func=lambda x: "🇫🇷 Français" if x == 'fr' else "🇬🇧 English",
+    index=0 if st.session_state.language == 'fr' else 1,
+    key="language_selector"
+)
+
+if language != st.session_state.language:
+    st.session_state.language = language
+    st.rerun()
+
 
 if 'transformations_applied' in st.session_state and len(st.session_state.transformations_applied) > 0:
-    st.sidebar.subheader("Historique des transformations")
+    st.sidebar.subheader(get_text('sidebar_history', lang))
     for i, transformation in enumerate(st.session_state.transformations_applied, start=1):
-        st.sidebar.write(f"{i}. {transformation['description']}")
-    if st.sidebar.button("↩️ Annuler dernière transformation"):
+        st.sidebar.write(f"{i}. {get_transformation_description(transformation, lang)}")
+    if st.sidebar.button(get_text('sidebar_undo', lang)):
         st.session_state.transformations_applied.pop()
         df_rebuilt = st.session_state.df_original.copy()
         for transformation in st.session_state.transformations_applied:
             df_rebuilt = replay_transformation(df_rebuilt, transformation)
         st.session_state.df_working = df_rebuilt
-        st.sidebar.success("✅ Transformation annulée")
+        st.sidebar.success(get_text('sidebar_undo_success', lang))
         st.rerun()
     
-    if st.sidebar.button("🔄 Tout recommencer"):
+    if st.sidebar.button(get_text('sidebar_reset', lang)):
         st.session_state.df_working = st.session_state.df_original.copy()
         st.session_state.transformations_applied = []
-        st.sidebar.success("✅ Données réinitialisées")
+        st.sidebar.success(get_text('sidebar_reset_success', lang))
         st.rerun()
 
 uploaded_file = st.file_uploader(
-    "Choisissez un fichier CSV ou Excel",
+    get_text('upload_label', lang),
     type=['csv', 'xlsx', 'xls', 'json'],
-    help="Formats supportés : CSV, Excel (.xlsx, .xls), JSON"
+    help=get_text('upload_help', lang)
 )
 
 if uploaded_file is not None or 'df_working' in st.session_state:
@@ -78,51 +273,49 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                 st.session_state.df_working = df.copy()
                 st.session_state.last_file = uploaded_file.name
                 st.session_state.transformations_applied = []
-                st.success(f"✅ Fichier chargé : {uploaded_file.name}")
+                st.success(get_text('upload_success', lang).format(uploaded_file.name))
         
         if 'df_working' in st.session_state:
             df = st.session_state.df_working
 
-
-
         # Comparaison avant/après si des transformations ont été appliquées
         if 'transformations_applied' in st.session_state and len(st.session_state.transformations_applied) > 0:
-            st.info("**📊 Impact des transformations :**")
+            st.info(get_text('comparison_title', lang))
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 original_rows = len(st.session_state.df_original)
                 current_rows = len(df)
                 delta_rows = current_rows - original_rows
-                st.metric("Lignes", f"{current_rows:,}", delta=f"{delta_rows:+,}" if delta_rows != 0 else "0", delta_color="normal")
+                st.metric(get_text('comparison_rows', lang), f"{current_rows:,}", delta=f"{delta_rows:+,}" if delta_rows != 0 else "0", delta_color="normal")
             
             with col2:
                 original_nan = st.session_state.df_original.isnull().sum().sum()
                 current_nan = df.isnull().sum().sum()
                 delta_nan = current_nan - original_nan
-                st.metric("Valeurs manquantes", f"{current_nan:,}", delta=f"{delta_nan:+,}" if delta_nan != 0 else "0", delta_color="inverse")
+                st.metric(get_text('comparison_missing', lang), f"{current_nan:,}", delta=f"{delta_nan:+,}" if delta_nan != 0 else "0", delta_color="inverse")
             
             with col3:
-                st.metric("Transformations", len(st.session_state.transformations_applied), delta=None)
+                st.metric(get_text('comparison_transformations', lang), len(st.session_state.transformations_applied), delta=None)
         
         # Tabs principales de navigation
         tab_profiling, tab_transformations, tab_export, tab_templates = st.tabs([
-            "📊 Profiling & Analyse",
-            "🔧 Transformations",
-            "💾 Export",
-            "📋 Templates"
+            get_text('tab_profiling', lang),
+            get_text('tab_transformations', lang),
+            get_text('tab_export', lang),
+            get_text('tab_templates', lang)
         ])
         
         # ========== TAB 1 : PROFILING ==========
         with tab_profiling:
-            st.subheader("📊 Aperçu des données")
+            st.subheader(get_text('profiling_overview', lang))
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Nombre de lignes", f"{len(df):,}")
+                st.metric(get_text('profiling_rows', lang), f"{len(df):,}")
             with col2:
-                st.metric("Nombre de colonnes", len(df.columns))
+                st.metric(get_text('profiling_cols', lang), len(df.columns))
             with col3:
-                st.metric("Taille mémoire", f"{df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+                st.metric(get_text('profiling_memory', lang), f"{df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
             
             # Formater le DataFrame selon les décimales définies
             if 'column_decimals' in st.session_state and st.session_state.column_decimals:
@@ -136,38 +329,38 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                 # Affichage normal
                 st.dataframe(df, use_container_width=True, height=400)
             
-            st.subheader("🔍 Profiling rapide")
+            st.subheader(get_text('profiling_quick', lang))
             missing_values = df.isnull().sum()
             if missing_values.sum() > 0:
-                st.warning(f"⚠️ Total de valeurs manquantes : {missing_values.sum():,}")
+                st.warning(get_text('profiling_missing_warning', lang).format(missing_values.sum()))
                 cols_with_missing = missing_values[missing_values > 0]
                 missing_df = pd.DataFrame({
-                    'Colonne': cols_with_missing.index,
-                    'Valeurs manquantes': cols_with_missing.values,
-                    'Pourcentage': (cols_with_missing.values / len(df) * 100).round(2)
+                    get_text('profiling_cols_label', lang): cols_with_missing.index,
+                    get_text('profiling_missing_label', lang): cols_with_missing.values,
+                    get_text('profiling_percentage_label', lang): (cols_with_missing.values / len(df) * 100).round(2)
                 })
                 st.dataframe(missing_df, use_container_width=True)
             else:
-                st.success("✅ Aucune valeur manquante détectée")
+                st.success(get_text('profiling_missing_success', lang))
             
-            st.subheader("📝 Types de données")
+            st.subheader(get_text('profiling_types', lang))
             types_df = pd.DataFrame({
-                'Colonne': df.columns,
-                'Type': df.dtypes.astype(str),
-                'Valeurs uniques': [df[col].nunique() for col in df.columns]
+                get_text('profiling_cols_label', lang): df.columns,
+                get_text('profiling_types_label', lang): df.dtypes.astype(str),
+                get_text('profiling_unique_label', lang): [df[col].nunique() for col in df.columns]
             })
             st.dataframe(types_df, use_container_width=True)
 
-            st.subheader("📅 Analyse des dates")
+            st.subheader(get_text('profiling_dates', lang))
             date_issues_found = False
             for col in df.columns:
                 if pd.api.types.is_datetime64_any_dtype(df[col]):
-                    st.success(f"✅ Colonne **{col}** : format datetime correct")
+                    st.success(f"✅ {get_text('profiling_date_correct', lang).format(col)}")
                 elif df[col].dtype == 'object':
                     formats = detect_date_formats_in_column(df[col])
                     if len(formats) > 1:
                         date_issues_found = True
-                        st.warning(f"📅 Colonne **{col}** : {len(formats)} formats de dates différents détectés")
+                        st.warning(f"📅 {get_text('profiling_date_multiple', lang).format(col, len(formats))}")
                         format_names = {
                             '%Y-%m-%d': 'YYYY-MM-DD',
                             '%d/%m/%Y': 'DD/MM/YYYY',
@@ -179,12 +372,12 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                             '%Y%m%d': 'YYYYMMDD',
                         }
                         for fmt, count in formats.items():
-                            st.write(f"  - Format {format_names.get(fmt, fmt)} : {count} valeur(s)")
+                            st.write(f"  - {get_text('profiling_date_format', lang)} {format_names.get(fmt, fmt)} : {count} {get_text('profiling_date_values', lang)}")
             
             if not date_issues_found:
-                st.info("ℹ️ Aucun problème de format de date détecté")
+                st.info(get_text('profiling_date_no_issues', lang))
 
-            st.subheader("⚠️ Détection d'anomalies")
+            st.subheader(get_text('profiling_anomalies', lang))
             anomalies_found = False
             for col in df.columns:
                 if df[col].dtype == 'object':
@@ -193,21 +386,21 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                     if convertible_pct > 50 and convertible_pct < 100:
                         anomalies_found = True
                         non_numeric = df[df[col].notna() & numeric_test.isna()][col].unique()[:5]
-                        st.warning(f"🔍 Colonne **{col}** : {convertible_pct:.1f}% des valeurs sont numériques, mais certaines ne le sont pas")
-                        st.write(f"Exemples de valeurs non-numériques : {list(non_numeric)}")
+                        st.warning(f"🔍 {get_text('profiling_anomaly_numeric', lang).format(col, convertible_pct)}")
+                        st.write(f"{get_text('profiling_anomaly_examples', lang)} {list(non_numeric)}")
 
             duplicates_count = df.duplicated().sum()
             if duplicates_count > 0:
                 anomalies_found = True
-                st.warning(f"🔄 **{duplicates_count} lignes dupliquées** détectées ({(duplicates_count/len(df)*100):.2f}%)")
-                if st.checkbox("Afficher les lignes dupliquées"):
+                st.warning(get_text('profiling_duplicates_warning', lang).format(duplicates_count, duplicates_count/len(df)*100))
+                if st.checkbox(get_text('profiling_duplicates_show', lang)):
                     st.dataframe(df[df.duplicated(keep=False)].sort_values(by=list(df.columns)), use_container_width=True, height=300)
             
             if not anomalies_found:
-                st.success("✅ Aucune anomalie majeure détectée")
+                st.success(get_text('profiling_anomalies_success', lang))
             
             if missing_values.sum() > 0:
-                st.subheader("🔥 Heatmap des valeurs manquantes")
+                st.subheader(get_text('profiling_heatmap', lang))
                 plt.clf()
                 plt.close('all')
                 fig, ax = plt.subplots(figsize=(10, 6))
@@ -215,119 +408,211 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                 st.pyplot(fig)
                 plt.clf()
                 plt.close('all')
-                st.caption("Les barres blanches indiquent les valeurs manquantes. Cherchez des patterns.")
+                st.caption(get_text('profiling_heatmap_caption', lang))
             
-            st.subheader("📊 Distribution des données numériques")
+            st.subheader(get_text('profiling_distribution', lang))
             numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
             if len(numeric_cols) > 0:
-                selected_col = st.selectbox("Choisissez une colonne à visualiser", numeric_cols)
+                selected_col = st.selectbox(get_text('profiling_select_column', lang), numeric_cols)
                 col1, col2 = st.columns(2)
                 with col1:
-                    fig_hist = px.histogram(df, x=selected_col, title=f"Distribution de {selected_col}", nbins=50)
+                    fig_hist = px.histogram(df, x=selected_col, title=f"{get_text('profiling_distribution_of', lang)} {selected_col}", nbins=50)
                     st.plotly_chart(fig_hist, use_container_width=True)
                 with col2:
-                    fig_box = px.box(df, y=selected_col, title=f"Boxplot de {selected_col}")
+                    fig_box = px.box(df, y=selected_col, title=f"{get_text('profiling_boxplot_of', lang)} {selected_col}")
                     st.plotly_chart(fig_box, use_container_width=True)
-                st.write("**Statistiques descriptives :**")
+                st.write(get_text('export_stats_label', lang))
                 stats = df[selected_col].describe()
                 st.dataframe(stats.to_frame().T, use_container_width=True)
             else:
-                st.info("Aucune colonne numérique à visualiser")
+                st.info(get_text('profiling_no_numeric', lang))
         
         # ========== TAB 2 : TRANSFORMATIONS ==========
         with tab_transformations:
-            st.subheader("🔧 Transformations de données")
+            st.subheader(get_text('trans_title', lang))
             
-            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Valeurs manquantes", "Conversion de types", "Doublons", "Filtrage", "Formatage", "Manipulation texte"])
+            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    get_text('trans_tab_missing', lang),
+    get_text('trans_tab_types', lang),
+    get_text('trans_tab_duplicates', lang),
+    get_text('trans_tab_filter', lang),
+    get_text('trans_tab_format', lang),
+    get_text('trans_tab_text', lang)
+])
             
 
             with tab1:
-                st.write("**Remplacer les valeurs manquantes**")
+                st.write(get_text('trans_missing_title', lang))
                 cols_with_na = [col for col in df.columns if df[col].isnull().sum() > 0]
                 
                 if len(cols_with_na) > 0:
-                    col_to_fix = st.selectbox("Choisir une colonne", cols_with_na, key="na_col_select")
+                    col_to_fix = st.selectbox(get_text('trans_missing_select', lang), cols_with_na, key="na_col_select")
                     na_count = df[col_to_fix].isnull().sum()
-                    st.info(f"Colonne **{col_to_fix}** : {na_count} valeurs manquantes ({na_count/len(df)*100:.1f}%)")
+                    st.info(get_text('trans_missing_info', lang).format(col_to_fix, na_count, na_count/len(df)*100))
                     
                     if df[col_to_fix].dtype in ['int64', 'float64']:
-                        strategy = st.radio("Stratégie de remplacement", ["Médiane", "Moyenne", "Valeur fixe", "Supprimer les lignes"], key="na_strategy")
+                        strategy = st.radio(
+    get_text('trans_missing_strategy', lang),
+    [
+        get_text('trans_missing_median', lang),
+        get_text('trans_missing_mean', lang),
+        get_text('trans_missing_fixed', lang),
+        get_text('trans_missing_drop', lang)
+    ],
+    key="na_strategy"
+)
                         if strategy == "Valeur fixe":
-                            fill_value = st.number_input("Valeur de remplacement", value=0.0)
+                            fill_value = st.number_input(get_text('trans_missing_value', lang), value=0.0)
                         
-                        if st.button("Appliquer", key="apply_na"):
+                        if st.button(get_text('trans_missing_apply', lang), key="apply_na"):
                             df_preview = st.session_state.df_working.copy()
-                            if strategy == "Médiane":
-                                df_preview[col_to_fix].fillna(df_preview[col_to_fix].median(), inplace=True)
-                                st.success(f"✅ Valeurs manquantes remplacées par la médiane ({df_preview[col_to_fix].median():.2f})")
-                            elif strategy == "Moyenne":
-                                df_preview[col_to_fix].fillna(df_preview[col_to_fix].mean(), inplace=True)
-                                st.success(f"✅ Valeurs manquantes remplacées par la moyenne ({df_preview[col_to_fix].mean():.2f})")
-                            elif strategy == "Valeur fixe":
-                                df_preview[col_to_fix].fillna(fill_value, inplace=True)
-                                st.success(f"✅ Valeurs manquantes remplacées par {fill_value}")
-                            elif strategy == "Supprimer les lignes":
-                                df_preview = df_preview.dropna(subset=[col_to_fix])
-                                st.success(f"✅ {na_count} lignes supprimées")
                             
-                            st.session_state.df_working = df_preview
-                            st.session_state.transformations_applied.append({
-                                'type': 'fill_na_numeric', 'column': col_to_fix, 'strategy': strategy.lower(),
-                                'fill_value': fill_value if strategy == "Valeur fixe" else None,
-                                'description': f"NaN remplacés dans '{col_to_fix}' par {strategy}"
-                            })
-                            st.rerun()
+                            # Validation : vérifier qu'il y a encore des NaN
+                            if df_preview[col_to_fix].isna().sum() == 0:
+                                st.warning(get_text('trans_missing_none_warning', lang))
+                                st.stop()
+                            
+                            try:
+                                if strategy == "Médiane":
+                                    median_val = df_preview[col_to_fix].median()
+                                    if pd.isna(median_val):
+                                        st.error(get_text('trans_missing_median_error', lang))
+                                        st.stop()
+                                    df_preview[col_to_fix].fillna(median_val, inplace=True)
+                                    st.success(get_text('trans_missing_median_success', lang).format(median_val))
+                                    
+                                elif strategy == "Moyenne":
+                                    mean_val = df_preview[col_to_fix].mean()
+                                    if pd.isna(mean_val):
+                                        st.error(get_text('trans_missing_mean_error', lang))
+                                        st.stop()
+                                    df_preview[col_to_fix].fillna(mean_val, inplace=True)
+                                    st.success(get_text('trans_missing_mean_success', lang).format(mean_val))
+                                    
+                                elif strategy == "Valeur fixe":
+                                    df_preview[col_to_fix].fillna(fill_value, inplace=True)
+                                    st.success(get_text('trans_missing_fixed_success', lang).format(fill_value))
+                                    
+                                elif strategy == "Supprimer les lignes":
+                                    rows_before = len(df_preview)
+                                    df_preview = df_preview.dropna(subset=[col_to_fix])
+                                    rows_removed = rows_before - len(df_preview)
+                                    
+                                    if rows_removed == 0:
+                                        st.warning(get_text('trans_missing_drop_warning', lang))
+                                        st.stop()
+                                    
+                                    st.success(get_text('trans_missing_drop_success', lang).format(rows_removed))
+                                
+                                st.session_state.df_working = df_preview
+                                st.session_state.transformations_applied.append({
+                                    'type': 'fill_na_numeric', 
+                                    'column': col_to_fix, 
+                                    'strategy': strategy.lower(),
+                                    'fill_value': fill_value if strategy == "Valeur fixe" else None,
+                                    'description': f"NaN remplacés dans '{col_to_fix}' par {strategy}"
+                                })
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(get_text('trans_missing_error', lang).format(str(e)))
                     else:
-                        strategy = st.radio("Stratégie de remplacement", ["Valeur fixe", "Mode (valeur la plus fréquente)", "Supprimer les lignes"], key="na_strategy_cat")
+                        strategy = st.radio(
+    get_text('trans_missing_strategy', lang),
+    [
+        get_text('trans_missing_fixed', lang),
+        get_text('trans_missing_mode', lang),
+        get_text('trans_missing_drop', lang)
+    ],
+    key="na_strategy_cat"
+)
                         if strategy == "Valeur fixe":
-                            fill_value = st.text_input("Valeur de remplacement", value="Inconnu")
+                            fill_value = st.text_input(get_text('trans_missing_value', lang), value="Inconnu")
                         
-                        if st.button("Appliquer", key="apply_na_cat"):
+                        if st.button(get_text('trans_missing_apply', lang), key="apply_na_cat"):
                             df_preview = st.session_state.df_working.copy()
-                            if strategy == "Valeur fixe":
-                                df_preview[col_to_fix].fillna(fill_value, inplace=True)
-                                st.success(f"✅ Valeurs manquantes remplacées par '{fill_value}'")
-                            elif strategy == "Mode (valeur la plus fréquente)":
-                                mode_val = df_preview[col_to_fix].mode()[0]
-                                df_preview[col_to_fix].fillna(mode_val, inplace=True)
-                                st.success(f"✅ Valeurs manquantes remplacées par le mode ('{mode_val}')")
-                            elif strategy == "Supprimer les lignes":
-                                df_preview = df_preview.dropna(subset=[col_to_fix])
-                                st.success(f"✅ {na_count} lignes supprimées")
                             
-                            st.session_state.df_working = df_preview
-                            st.session_state.transformations_applied.append({
-                                'type': 'fill_na_categorical', 'column': col_to_fix, 'strategy': strategy.lower(),
-                                'fill_value': fill_value if strategy == "Valeur fixe" else None,
-                                'description': f"NaN remplacés dans '{col_to_fix}' par {strategy}"
-                            })
-                            st.rerun()
+                            # Validation : vérifier qu'il y a encore des NaN
+                            if df_preview[col_to_fix].isna().sum() == 0:
+                                st.warning(get_text('trans_missing_none_warning', lang))
+                                st.stop()
+                            
+                            try:
+                                if strategy == "Valeur fixe":
+                                    if not fill_value or fill_value.strip() == "":
+                                        st.error(get_text('trans_missing_fixed_error', lang))
+                                        st.stop()
+                                    df_preview[col_to_fix].fillna(fill_value, inplace=True)
+                                    st.success(get_text('trans_missing_fixed_success', lang).format(fill_value))
+                                    
+                                elif strategy == "Mode (valeur la plus fréquente)":
+                                    mode_series = df_preview[col_to_fix].mode()
+                                    if len(mode_series) == 0:
+                                        st.error(get_text('trans_missing_mode_error', lang))
+                                        st.stop()
+                                    mode_val = mode_series[0]
+                                    df_preview[col_to_fix].fillna(mode_val, inplace=True)
+                                    st.success(get_text('trans_missing_mode_success', lang).format(mode_val))
+                                    
+                                elif strategy == "Supprimer les lignes":
+                                    rows_before = len(df_preview)
+                                    df_preview = df_preview.dropna(subset=[col_to_fix])
+                                    rows_removed = rows_before - len(df_preview)
+                                    
+                                    if rows_removed == 0:
+                                        st.warning(get_text('trans_missing_drop_warning', lang))
+                                        st.stop()
+                                    
+                                    st.success(get_text('trans_missing_drop_success', lang).format(rows_removed))
+                                
+                                st.session_state.df_working = df_preview
+                                st.session_state.transformations_applied.append({
+                                    'type': 'fill_na_categorical', 
+                                    'column': col_to_fix, 
+                                    'strategy': strategy.lower(),
+                                    'fill_value': fill_value if strategy == "Valeur fixe" else None,
+                                    'description': f"NaN remplacés dans '{col_to_fix}' par {strategy}"
+                                })
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(get_text('trans_missing_error', lang).format(str(e)))
+
                 else:
-                    st.success("✅ Aucune valeur manquante à traiter")
+                    st.success(get_text('trans_missing_none', lang))
             
 
             with tab2:
-                st.write("**Convertir le type d'une colonne**")
-                col_to_convert = st.selectbox("Choisir une colonne", df.columns.tolist(), key="convert_col_select")
+                st.write(get_text('trans_convert_title', lang))
+                col_to_convert = st.selectbox(get_text('trans_convert_select', lang), df.columns.tolist(), key="convert_col_select")
                 current_type = df[col_to_convert].dtype
-                st.info(f"Type actuel : **{current_type}**")
-                target_type = st.selectbox("Convertir en", ["Numérique (float)", "Numérique (int)", "Texte (string)", "Date/Heure"], key="target_type")
+                st.info(get_text('trans_convert_current', lang).format(current_type))
+                target_type = st.selectbox(
+    get_text('trans_convert_target', lang),
+    [
+        get_text('trans_convert_float', lang),
+        get_text('trans_convert_int', lang),
+        get_text('trans_convert_string', lang),
+        get_text('trans_convert_datetime', lang)
+    ],
+    key="target_type"
+)
                 
-                if st.button("Appliquer conversion", key="apply_convert"):
+                if st.button(get_text('trans_convert_apply', lang), key="apply_convert"):
                     df_preview = st.session_state.df_working.copy()
                     try:
                         if target_type == "Numérique (float)":
                             df_preview[col_to_convert] = pd.to_numeric(df_preview[col_to_convert], errors='coerce')
-                            st.success(f"✅ Colonne '{col_to_convert}' convertie en float")
+                            st.success(get_text('trans_convert_float_success', lang).format(col_to_convert))
                         elif target_type == "Numérique (int)":
                             df_preview[col_to_convert] = pd.to_numeric(df_preview[col_to_convert], errors='coerce').astype('Int64')
-                            st.success(f"✅ Colonne '{col_to_convert}' convertie en int")
+                            st.success(get_text('trans_convert_int_success', lang).format(col_to_convert))
                         elif target_type == "Texte (string)":
                             df_preview[col_to_convert] = df_preview[col_to_convert].astype(str)
-                            st.success(f"✅ Colonne '{col_to_convert}' convertie en string")
+                            st.success(get_text('trans_convert_string_success', lang).format(col_to_convert))
                         elif target_type == "Date/Heure":
                             df_preview[col_to_convert] = pd.to_datetime(df_preview[col_to_convert], errors='coerce')
-                            st.success(f"✅ Colonne '{col_to_convert}' convertie en datetime")
+                            st.success(get_text('trans_convert_datetime_success', lang).format(col_to_convert))
                         
                         st.session_state.df_working = df_preview
                         st.session_state.transformations_applied.append({
@@ -336,17 +621,25 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                         })
                         st.rerun()
                     except Exception as e:
-                        st.error(f"❌ Erreur lors de la conversion : {str(e)}")
+                        st.error(get_text('trans_convert_error', lang).format(str(e)))
             
 
             with tab3:
-                st.write("**Supprimer les lignes dupliquées**")
+                st.write(get_text('trans_dup_title', lang))
                 dup_count = df.duplicated().sum()
                 if dup_count > 0:
-                    st.warning(f"⚠️ {dup_count} ligne(s) dupliquée(s) détectée(s)")
-                    keep_strategy = st.radio("Quelle occurrence garder ?", ["Première", "Dernière", "Aucune (supprimer toutes)"], key="dup_strategy")
+                    st.warning(get_text('trans_dup_warning', lang).format(dup_count))
+                    keep_strategy = st.radio(
+    get_text('trans_dup_strategy', lang),
+    [
+        get_text('trans_dup_first', lang),
+        get_text('trans_dup_last', lang),
+        get_text('trans_dup_none', lang)
+    ],
+    key="dup_strategy"
+)
                     
-                    if st.button("Supprimer les doublons", key="apply_dup"):
+                    if st.button(get_text('trans_dup_apply', lang), key="apply_dup"):
                         df_preview = st.session_state.df_working.copy()
                         if keep_strategy == "Première":
                             df_preview = df_preview.drop_duplicates(keep='first')
@@ -355,7 +648,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                         else:
                             df_preview = df_preview.drop_duplicates(keep=False)
                         
-                        st.success(f"✅ {dup_count} doublon(s) supprimé(s)")
+                        st.success(get_text('trans_dup_success', lang).format(dup_count))
                         st.session_state.df_working = df_preview
                         st.session_state.transformations_applied.append({
                             'type': 'drop_duplicates', 'keep': keep_strategy.lower(),
@@ -363,25 +656,25 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                         })
                         st.rerun()
                 else:
-                    st.success("✅ Aucun doublon détecté")
+                    st.success(get_text('trans_dup_no_duplicates', lang))
             
 
             with tab4:
-                st.write("**Filtrer les lignes selon des critères**")
+                st.write(get_text('trans_filter_title', lang))
                 
                 if 'filters_list' not in st.session_state:
                     st.session_state.filters_list = []
                 
-                st.info(" Les filtres s'appliquent avec un opérateur ET (toutes les conditions doivent être vraies)")
+                st.info(get_text('trans_filter_info', lang))
                 
                 # Section : Ajouter un filtre
-                st.subheader("➕ Ajouter un filtre")
+                st.subheader(get_text('trans_filter_add_title', lang))
                 
                 col1, col2 = st.columns([2, 1])
                 
                 with col1:
                     filter_col = st.selectbox(
-                        "Colonne à filtrer",
+                        get_text('trans_filter_column', lang),
                         df.columns.tolist(),
                         key="filter_col_select"
                     )
@@ -396,7 +689,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                     else:
                         filter_category = "Texte"
                     
-                    st.metric("Type détecté", filter_category)
+                    st.metric(get_text('trans_filter_type', lang), filter_category)
                 
                 # Options de filtre selon le type
                 if filter_category == "Numérique":
@@ -447,7 +740,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                     
                     filter_value = st.text_input("Valeur", key="text_value")
                 
-                if st.button("➕ Ajouter ce filtre", key="add_filter_btn"):
+                if st.button(get_text('trans_filter_add_btn', lang), key="add_filter_btn"):
                     if filter_value or operator in ["Entre", "N'est pas entre"]:
                         # Ajouter le filtre à la liste
                         st.session_state.filters_list.append({
@@ -456,15 +749,15 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                             'operator': operator,
                             'value': filter_value
                         })
-                        st.success(f"✅ Filtre ajouté : {filter_col} {operator} {filter_value}")
+                        st.success(get_text('trans_filter_add_success', lang).format(filter_col, operator, filter_value))
                         st.rerun()
                     else:
-                        st.error("❌ Veuillez saisir une valeur")
+                        st.error(get_text('trans_filter_add_error', lang))
                 
                 # Section : Filtres actifs
                 if st.session_state.filters_list:
                     st.divider()
-                    st.subheader("🔍 Filtres actifs")
+                    st.subheader(get_text('trans_filter_active_title', lang))
                     
                     for i, f in enumerate(st.session_state.filters_list):
                         col1, col2 = st.columns([5, 1])
@@ -473,7 +766,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                             st.write(f"**{i+1}.** {f['column']} {f['operator']} {f['value']}")
                         
                         with col2:
-                            if st.button("X", key=f"delete_filter_{i}"):
+                            if st.button(get_text('trans_filter_delete', lang), key=f"delete_filter_{i}"):
                                 st.session_state.filters_list.pop(i)
                                 st.rerun()
                     
@@ -482,12 +775,12 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        if st.button("🔄 Réinitialiser tous les filtres", key="reset_filters"):
+                        if st.button(get_text('trans_filter_reset', lang), key="reset_filters"):
                             st.session_state.filters_list = []
                             st.rerun()
                     
                     with col2:
-                        if st.button("✅ Appliquer les filtres", key="apply_filters"):
+                        if st.button(get_text('trans_filter_apply', lang), key="apply_filters"):
                             df_preview = st.session_state.df_working.copy()
                             initial_count = len(df_preview)
                             
@@ -545,7 +838,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                             removed_count = initial_count - final_count
                             
                             if final_count == 0:
-                                st.error("❌ Aucune ligne ne correspond aux filtres ! Tous les filtres ont été annulés.")
+                                st.error(get_text('trans_filter_no_results', lang))
                             else:
                                 # Description des filtres
                                 filter_descriptions = []
@@ -554,7 +847,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                                 
                                 description = f"Filtrage appliqué : {' ET '.join(filter_descriptions)}"
                                 
-                                st.success(f"✅ Filtres appliqués : {final_count} lignes conservées, {removed_count} lignes supprimées")
+                                st.success(get_text('trans_filter_success', lang).format(final_count, removed_count))
                                 
                                 # Sauvegarder
                                 st.session_state.df_working = df_preview
@@ -570,11 +863,11 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                                 st.session_state.filters_list = []
                                 st.rerun()
                 else:
-                    st.info("ℹ️ Aucun filtre actif. Ajoutez un filtre ci-dessus.")
+                    st.info(get_text('trans_filter_none', lang))
             
 
             with tab5:
-                st.write("**Formater l'affichage des colonnes numériques**")
+                st.write(get_text('trans_format_title', lang))
                 
                 # Initialiser le dictionnaire de formatage s'il n'existe pas
                 if 'column_decimals' not in st.session_state:
@@ -583,13 +876,13 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
                 
                 if len(numeric_cols) > 0:
-                    st.write("Choisissez le nombre de décimales pour chaque colonne :")
+                    st.write(get_text('trans_format_choose', lang))
                     
                     col1, col2 = st.columns([2, 1])
                     
                     with col1:
                         selected_col = st.selectbox(
-                            "Colonne à formater",
+                            get_text('trans_format_column', lang),
                             numeric_cols,
                             key="format_col_select"
                         )
@@ -597,45 +890,45 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                     with col2:
                         current_decimals = st.session_state.column_decimals.get(selected_col, 2)
                         decimals = st.number_input(
-                            "Nombre de décimales",
+                            get_text('trans_format_decimals', lang),
                             min_value=0,
                             max_value=10,
                             value=current_decimals,
                             key="format_decimals"
                         )
                     
-                    if st.button("Appliquer le formatage", key="apply_format"):
+                    if st.button(get_text('trans_format_apply', lang), key="apply_format"):
                         st.session_state.column_decimals[selected_col] = decimals
-                        st.success(f"✅ Colonne '{selected_col}' formatée avec {decimals} décimale(s)")
+                        st.success(get_text('trans_format_success', lang).format(selected_col, decimals))
                         st.rerun()
                     
                     # Afficher les formatages actuels
                     if st.session_state.column_decimals:
-                        st.write("**Formatages appliqués :**")
+                        st.write(get_text('trans_format_current_title', lang))
                         format_df = pd.DataFrame([
-                            {"Colonne": col, "Décimales": dec}
+                            {get_text('trans_format_col_label', lang): col, get_text('trans_format_dec_label', lang): dec}
                             for col, dec in st.session_state.column_decimals.items()
                         ])
                         st.dataframe(format_df, use_container_width=True, hide_index=True)
                         
-                        if st.button("🔄 Réinitialiser tous les formatages", key="reset_formats"):
+                        if st.button(get_text('trans_format_reset', lang), key="reset_formats"):
                             st.session_state.column_decimals = {}
-                            st.success("✅ Formatages réinitialisés")
+                            st.success(get_text('trans_format_reset_success', lang))
                             st.rerun()
                 else:
-                    st.info("Aucune colonne numérique à formater")
+                    st.info(get_text('trans_format_none', lang))
 
 
             with tab6:
-                st.write("**Nettoyer, extraire et séparer les données textuelles**")
+                st.write(get_text('trans_text_title', lang))
                 
                 # Sous-tabs pour les opérations texte
                 text_tab1, text_tab2, text_tab3, text_tab4 = st.tabs([
-                    "Nettoyage",
-                    "Extraction", 
-                    "Split colonnes",
-                    "Find & Replace"
-                ])
+    get_text('trans_text_tab_clean', lang),
+    get_text('trans_text_tab_extract', lang),
+    get_text('trans_text_tab_split', lang),
+    get_text('trans_text_tab_replace', lang)
+])
                 
                 # ========== SOUS-TAB 1 : NETTOYAGE ==========
                 with text_tab1:
@@ -724,7 +1017,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                             })
                             st.rerun()
                     else:
-                        st.info("Aucune colonne textuelle détectée")
+                        st.info(get_text('trans_text_no_columns', lang))
                 
                 # ========== SOUS-TAB 2 : EXTRACTION ==========
                 with text_tab2:
@@ -828,7 +1121,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                                 st.error(f"❌ Erreur lors de l'extraction : {str(e)}")
                                 st.info("💡 Vérifiez votre pattern regex si vous utilisez un pattern personnalisé")
                     else:
-                        st.info("Aucune colonne textuelle détectée")
+                        st.info(get_text('trans_text_no_columns', lang))
                 
                 # ========== SOUS-TAB 3 : SPLIT COLONNES ==========
                 with text_tab3:
@@ -995,7 +1288,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                                 st.error(f"❌ Erreur lors de la séparation : {str(e)}")
                                 st.info("💡 Vérifiez que le séparateur existe bien dans vos données")
                     else:
-                        st.info("Aucune colonne textuelle détectée")
+                        st.info(get_text('trans_text_no_columns', lang))
 
                 # ========== SOUS-TAB 4 : FIND & REPLACE AVANCÉ ==========
                 with text_tab4:
@@ -1228,25 +1521,10 @@ if uploaded_file is not None or 'df_working' in st.session_state:
 
                             
                     else:
-                        st.info("Aucune colonne textuelle détectée")
+                        st.info(get_text('trans_text_no_columns', lang))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-            
             # Suggestions de nettoyage
-            st.subheader("💡 Suggestions de nettoyage")
+            st.subheader(get_text('trans_suggestions', lang))
             suggestions = []
             
             if missing_values.sum() > 0:
@@ -1298,27 +1576,27 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                         })
             
             if suggestions:
-                st.write(f"**{len(suggestions)} action(s) recommandée(s) :**")
+                st.write(f"**{get_text('trans_suggestions_count', lang).format(len(suggestions))}**")
                 suggestions_df = pd.DataFrame(suggestions)
                 priority_order = {'🔴 HAUTE': 0, '🟠 IMPORTANTE': 1, '🟡 MOYENNE': 2}
                 suggestions_df['_sort'] = suggestions_df['priorité'].map(priority_order)
                 suggestions_df = suggestions_df.sort_values('_sort').drop('_sort', axis=1)
                 st.dataframe(suggestions_df, use_container_width=True, hide_index=True,
                     column_config={
-                        'priorité': st.column_config.TextColumn('Priorité', width='small'),
-                        'problème': st.column_config.TextColumn('Problème détecté', width='medium'),
-                        'action': st.column_config.TextColumn('Action recommandée', width='medium'),
-                        'raison': st.column_config.TextColumn('Pourquoi ?', width='medium')
+                        'priorité': st.column_config.TextColumn(get_text('trans_priority', lang), width='small'),
+                        'problème': st.column_config.TextColumn(get_text('trans_problem', lang), width='medium'),
+                        'action': st.column_config.TextColumn(get_text('trans_action', lang), width='medium'),
+                        'raison': st.column_config.TextColumn(get_text('trans_reason', lang), width='medium')
                     })
-                st.info("💡 **Prochaine étape** : Ces suggestions seront bientôt automatisables en un clic !")
+                st.info(get_text('trans_suggestions_next', lang))
             else:
-                st.success("✅ Aucune action de nettoyage nécessaire - vos données sont propres !")
+                st.success(get_text('trans_suggestions_clean', lang))
         
         # ========== TAB 3 : EXPORT ==========
         with tab_export:
-            st.subheader("💾 Export des données nettoyées")
+            st.subheader(get_text('export_title', lang))
             
-            st.write("**Téléchargez vos données nettoyées dans le format de votre choix :**")
+            st.write(get_text('export_download', lang))
             
             col1, col2, col3 = st.columns(3)
             
@@ -1326,7 +1604,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                 # Export CSV
                 csv = df.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label="📥 Télécharger CSV",
+                    label=get_text('export_csv', lang),
                     data=csv,
                     file_name=f"cleaned_{st.session_state.get('last_file', 'data')}.csv",
                     mime="text/csv",
@@ -1340,7 +1618,7 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                     df.to_excel(writer, index=False, sheet_name='Données nettoyées')
                 
                 st.download_button(
-                    label="📥 Télécharger Excel",
+                    label=get_text('export_excel', lang),
                     data=buffer.getvalue(),
                     file_name=f"cleaned_{st.session_state.get('last_file', 'data').replace('.csv', '')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1351,20 +1629,20 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                 # Export JSON
                 json_str = df.to_json(orient='records', indent=2, force_ascii=False)
                 st.download_button(
-                    label="📥 Télécharger JSON",
+                    label=get_text('export_json', lang),
                     data=json_str,
                     file_name=f"cleaned_{st.session_state.get('last_file', 'data').replace('.csv', '').replace('.xlsx', '')}.json",
                     mime="application/json",
                     use_container_width=True)
-            st.info(f"📊 Le fichier contient **{len(df):,} lignes** et **{len(df.columns)} colonnes**")
+            st.info(get_text('export_info', lang).format(len(df), len(df.columns)))
 
             st.divider()
     
             # Génération de code Python
-            st.subheader("Code Python reproductible")
+            st.subheader(get_text('export_code_title', lang))
             
             if 'transformations_applied' in st.session_state and len(st.session_state.transformations_applied) > 0:
-                st.write("**Copiez ce code pour reproduire vos transformations :**")
+                st.write(get_text('export_code_copy', lang))
                 
                 python_code = generate_python_code(
                     st.session_state.transformations_applied,
@@ -1375,64 +1653,64 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                 
                 # Bouton pour copier
                 st.download_button(
-                    label="📋 Télécharger le script Python",
+                    label=get_text('export_code_download', lang),
                     data=python_code,
                     file_name="cleaning_script.py",
                     mime="text/x-python",
                     use_container_width=True
                 )
             else:
-                st.info("ℹ️ Aucune transformation appliquée. Le code sera généré après vos modifications.")
+                st.info(get_text('export_code_none', lang))
 
         # ========== TAB 4 : TEMPLATES ==========
         with tab_templates:
-            st.subheader("📋 Templates de nettoyage")
+            st.subheader(get_text('templates_title', lang))
             
-            st.info("💡 Les templates permettent de sauvegarder et réutiliser vos séquences de transformations")
+            st.info(get_text('templates_info', lang))
             
             # Deux colonnes : Sauvegarder / Charger
             col1, col2 = st.columns(2)
             
             # ===== COLONNE 1 : SAUVEGARDER =====
             with col1:
-                st.write("**💾 Sauvegarder l'historique actuel**")
+                st.write(get_text('templates_save', lang))
                 
                 if 'transformations_applied' in st.session_state and len(st.session_state.transformations_applied) > 0:
-                    st.success(f"✅ {len(st.session_state.transformations_applied)} transformation(s) dans l'historique")
+                    st.success(get_text('templates_success_count', lang).format(len(st.session_state.transformations_applied)))
                     
                     template_name = st.text_input(
-                        "Nom du template",
-                        placeholder="Ex: Nettoyage clients e-commerce",
+                        get_text('templates_name', lang),
+                        placeholder=get_text('templates_name_placeholder', lang),
                         key="template_name_input"
                     )
                     
-                    if st.button("💾 Sauvegarder comme template", key="save_template_btn"):
+                    if st.button(get_text('templates_save_btn', lang), key="save_template_btn"):
                         if template_name:
                             try:
                                 filepath = save_template(template_name, st.session_state.transformations_applied)
-                                st.success(f"✅ Template '{template_name}' sauvegardé !")
-                                st.info(f"📁 Fichier : {filepath}")
+                                st.success(get_text('templates_save_success', lang).format(template_name))
+                                st.info(get_text('templates_save_file', lang).format(filepath))
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"❌ Erreur lors de la sauvegarde : {str(e)}")
+                                st.error(get_text('templates_save_error', lang).format(str(e)))
                         else:
-                            st.error("❌ Veuillez donner un nom au template")
+                            st.error(get_text('templates_name_error', lang))
                 else:
-                    st.warning("⚠️ Aucune transformation dans l'historique. Effectuez des transformations d'abord.")
+                    st.warning(get_text('templates_no_trans', lang))
             
             # ===== COLONNE 2 : CHARGER =====
             with col2:
-                st.write("**📂 Charger un template existant**")
+                st.write(get_text('templates_load', lang))
                 
                 templates = load_templates()
                 
                 if templates:
-                    st.success(f"✅ {len(templates)} template(s) disponible(s)")
+                    st.success(get_text('templates_available', lang).format(len(templates)))
                     
                     # Sélection du template
                     template_options = {t['name']: t for t in templates}
                     selected_template_name = st.selectbox(
-                        "Choisir un template",
+                        get_text('templates_select', lang),
                         options=list(template_options.keys()),
                         key="template_select"
                     )
@@ -1440,83 +1718,74 @@ if uploaded_file is not None or 'df_working' in st.session_state:
                     selected_template = template_options[selected_template_name]
                     
                     # Infos du template
-                    st.write(f"**Informations :**")
-                    st.write(f"- Créé le : {selected_template['created_at'][:10]}")
-                    st.write(f"- Transformations : {selected_template['count']}")
+                    st.write(get_text('templates_info_title', lang))
+                    st.write(f"{get_text('templates_created', lang).format(selected_template['created_at'][:10])}")
+                    st.write(f"{get_text('templates_trans_count', lang).format(selected_template['count'])}")
                     
                     col_load, col_delete = st.columns(2)
                     
                     with col_load:
-                        if st.button("📥 Appliquer ce template", key="load_template_btn"):
+                        if st.button(get_text('templates_apply', lang), key="load_template_btn"):
                             try:
                                 # Charger les transformations du template
                                 template_data = load_template_data(selected_template['filepath'])
                                 template_transformations = template_data['transformations']
                                 
+                                # Validation : vérifier compatibilité basique
+                                if len(template_transformations) == 0:
+                                    st.warning(get_text('templates_no_trans_warning', lang))
+                                    st.stop()
+                                
                                 # Appliquer toutes les transformations
                                 df_result = st.session_state.df_original.copy()
                                 
+                                success_count = 0
+                                warning_count = 0
+                                
                                 for transformation in template_transformations:
+                                    df_before = len(df_result)
                                     df_result = replay_transformation(df_result, transformation)
+                                    
+                                    # Compter si la transformation a réussi
+                                    if len(df_result) > 0:
+                                        success_count += 1
+                                    else:
+                                        warning_count += 1
+                                
+                                if len(df_result) == 0:
+                                    st.error(get_text('templates_all_deleted', lang))
+                                    st.info(get_text('templates_incompatible', lang))
+                                    st.stop()
                                 
                                 # Mettre à jour
                                 st.session_state.df_working = df_result
                                 st.session_state.transformations_applied = template_transformations.copy()
                                 
-                                st.success(f"✅ Template '{selected_template_name}' appliqué : {selected_template['count']} transformation(s)")
+                                if warning_count > 0:
+                                    st.warning(get_text('templates_warning_count', lang).format(warning_count))
+                                st.success(get_text('templates_success_apply', lang).format(selected_template_name, success_count, len(template_transformations)))
                                 st.rerun()
                                 
                             except Exception as e:
-                                st.error(f"❌ Erreur lors de l'application : {str(e)}")
-                                st.info("💡 Vérifiez que le template est compatible avec vos données")
+                                st.error(get_text('templates_error', lang).format(str(e)))
+                                st.info(get_text('templates_check_compat', lang))
+
                     
                     with col_delete:
-                        if st.button("🗑️ Supprimer", key="delete_template_btn"):
+                        if st.button(get_text('templates_delete', lang), key="delete_template_btn"):
                             try:
                                 delete_template(selected_template['filepath'])
-                                st.success(f"✅ Template '{selected_template_name}' supprimé")
+                                st.success(get_text('templates_delete_success', lang).format(selected_template_name))
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"❌ Erreur : {str(e)}")
+                                st.error(get_text('templates_delete_error', lang).format(str(e)))
                 else:
-                    st.info("ℹ️ Aucun template sauvegardé pour le moment")
-            
-            # ===== SECTION : TEMPLATES PRÉDÉFINIS =====
-            st.divider()
-            st.subheader("🎨 Templates prédéfinis")
-            
-            st.info("💡 Templates courants pour des cas d'usage typiques")
-            
-            predefined_templates = {
-                "Nettoyage basique": {
-                    "description": "Trim espaces, minuscules, suppression doublons",
-                    "transformations": []  # On pourrait ajouter des transformations prédéfinies ici
-                },
-                "Nettoyage e-commerce": {
-                    "description": "Normalisation prix, emails, téléphones",
-                    "transformations": []
-                },
-                "Nettoyage CRM": {
-                    "description": "Noms en title case, emails en minuscules, dates formatées",
-                    "transformations": []
-                }
-            }
-            
-            cols = st.columns(3)
-            
-            for i, (name, info) in enumerate(predefined_templates.items()):
-                with cols[i]:
-                    st.write(f"**{name}**")
-                    st.caption(info['description'])
-                    if st.button("Utiliser", key=f"predefined_{i}"):
-                        st.info("🚧 Fonctionnalité à venir : templates prédéfinis personnalisables")
-
-
-
+                    st.info(get_text('templates_none', lang))
+               
 
     except Exception as e:
         st.error(f"❌ Erreur lors du chargement du fichier : {str(e)}")
         st.info("Vérifiez que votre fichier est bien formaté.")
 
 else:
-    st.info("👆 Uploadez un fichier CSV ou Excel pour commencer")
+    st.info(get_text('upload_info', lang))

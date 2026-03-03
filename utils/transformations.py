@@ -8,218 +8,283 @@ import pandas as pd
 
 def replay_transformation(df_copy, transformation):
     """
-    Rejoue une transformation sur un DataFrame.
+    Rejoue une transformation sur un DataFrame avec gestion d'erreurs.
     
     Args:
         df_copy: DataFrame sur lequel appliquer la transformation
         transformation: Dict contenant les infos de la transformation
         
     Returns:
-        DataFrame transformé
+        DataFrame transformé ou DataFrame original si erreur
     """
-    trans_type = transformation['type']
-    
-    # Remplissage valeurs manquantes
-    if trans_type in ['fill_na', 'fill_na_numeric', 'fill_na_categorical']:
-        col = transformation['column']
-        strategy = transformation.get('strategy', transformation.get('method', ''))
+    try:
+        trans_type = transformation['type']
         
-        if strategy in ['supprimer les lignes', 'Supprimer les lignes']:
-            df_copy = df_copy.dropna(subset=[col])
-        elif strategy in ['valeur fixe', 'Valeur fixe']:
-            fill_value = transformation.get('fill_value')
-            if fill_value is not None:
-                df_copy[col].fillna(fill_value, inplace=True)
-        elif strategy in ['médiane', 'Médiane']:
-            df_copy[col].fillna(df_copy[col].median(), inplace=True)
-        elif strategy in ['moyenne', 'Moyenne']:
-            df_copy[col].fillna(df_copy[col].mean(), inplace=True)
-        elif strategy in ['mode (valeur la plus fréquente)', 'Mode (valeur la plus fréquente)']:
-            mode_val = df_copy[col].mode()[0] if len(df_copy[col].mode()) > 0 else None
-            if mode_val is not None:
-                df_copy[col].fillna(mode_val, inplace=True)
-        elif strategy == 'Propagation avant (ffill)':
-            df_copy[col].fillna(method='ffill', inplace=True)
-        elif strategy == 'Propagation arrière (bfill)':
-            df_copy[col].fillna(method='bfill', inplace=True)
-        elif strategy == 'Remplir avec la moyenne':
-            df_copy[col].fillna(df_copy[col].mean(), inplace=True)
-        elif strategy == 'Remplir avec la médiane':
-            df_copy[col].fillna(df_copy[col].median(), inplace=True)
-        elif strategy == 'Remplir avec une valeur':
-            fill_value = transformation.get('value', transformation.get('fill_value'))
-            if fill_value is not None:
-                df_copy[col].fillna(fill_value, inplace=True)
-
-
-    # Conversion de types
-    elif trans_type == 'convert_type':
-        col = transformation['column']
-        target_type = transformation['target_type']
-        
-        if target_type == 'Entier (int)':
-            df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(0).astype(int)
-        elif target_type == 'Décimal (float)':
-            df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce')
-        elif target_type == 'Texte (string)':
-            df_copy[col] = df_copy[col].astype(str)
-        elif target_type == 'Date (datetime)':
-            df_copy[col] = pd.to_datetime(df_copy[col], errors='coerce')
-        elif target_type == 'Booléen (bool)':
-            df_copy[col] = df_copy[col].astype(bool)
-    
-    # Suppression doublons
-    elif trans_type == 'drop_duplicates':
-        keep = transformation['keep']
-        keep_map = {'première': 'first', 'dernière': 'last', 'aucune': False}
-        df_copy = df_copy.drop_duplicates(keep=keep_map[keep])
-    
-    # Formatage décimales
-    elif trans_type == 'format_decimals':
-        col = transformation['column']
-        decimals = transformation['decimals']
-        df_copy[col] = df_copy[col].round(decimals)
-    
-    # Nettoyage texte
-    elif trans_type == 'text_cleaning':
-        col = transformation['column']
-        operation = transformation['operation']
-        
-        if operation == "Supprimer espaces début/fin (trim)":
-            df_copy[col] = df_copy[col].str.strip()
-        elif operation == "Convertir en minuscules":
-            df_copy[col] = df_copy[col].str.lower()
-        elif operation == "Convertir en majuscules":
-            df_copy[col] = df_copy[col].str.upper()
-        elif operation == "Convertir en title case (Première Lettre Majuscule)":
-            df_copy[col] = df_copy[col].str.title()
-        elif operation == "Remplacer une valeur":
-            replace_from = transformation['replace_from']
-            replace_to = transformation['replace_to']
-            if replace_from and replace_to is not None:
-                df_copy[col] = df_copy[col].str.replace(replace_from, replace_to, regex=False)
-        elif operation == "Supprimer caractères spéciaux":
-            df_copy[col] = df_copy[col].str.replace(r'[^a-zA-Z0-9\s]', '', regex=True)
-    
-    # Extraction pattern
-    elif trans_type == 'extract_pattern':
-        source_col = transformation['source_column']
-        new_col = transformation['new_column']
-        pattern = transformation['pattern']
-        
-        if '(' in pattern and ')' in pattern:
-            df_copy[new_col] = df_copy[source_col].str.extract(pattern, expand=False)
-        else:
-            df_copy[new_col] = df_copy[source_col].str.extract(f'({pattern})', expand=False)
-    
-    # Split colonnes
-    elif trans_type == 'split_column':
-        source_col = transformation['source_column']
-        new_cols = transformation['new_columns']
-        split_method = transformation['split_method']
-        
-        if split_method == 'separator':
-            separator = transformation['separator']
-            n_splits = transformation['n_splits']
-            split_data = df_copy[source_col].str.split(separator, n=n_splits-1, expand=True)
+        # Remplissage valeurs manquantes
+        if trans_type in ['fill_na', 'fill_na_numeric', 'fill_na_categorical']:
+            col = transformation['column']
             
-            for i, col_name in enumerate(new_cols):
-                if i < split_data.shape[1]:
-                    df_copy[col_name] = split_data[i]
+            # Validation : colonne existe
+            if col not in df_copy.columns:
+                st.warning(f" Colonne '{col}' introuvable, transformation ignorée")
+                return df_copy
+            
+            strategy = transformation.get('strategy', transformation.get('method', ''))
+            
+            if strategy in ['supprimer les lignes', 'Supprimer les lignes']:
+                df_copy = df_copy.dropna(subset=[col])
+            elif strategy in ['valeur fixe', 'Valeur fixe']:
+                fill_value = transformation.get('fill_value')
+                if fill_value is not None:
+                    df_copy[col].fillna(fill_value, inplace=True)
+            elif strategy in ['médiane', 'Médiane']:
+                if df_copy[col].dtype in ['int64', 'float64']:
+                    median_val = df_copy[col].median()
+                    if pd.notna(median_val):
+                        df_copy[col].fillna(median_val, inplace=True)
                 else:
-                    df_copy[col_name] = None
-        
-        elif split_method == 'position':
-            position = transformation['position']
-            df_copy[new_cols[0]] = df_copy[source_col].str[:position]
-            df_copy[new_cols[1]] = df_copy[source_col].str[position:].str.strip()
-        
-        elif split_method == 'regex':
-            pattern = transformation['pattern']
-            n_splits = transformation['n_splits']
-            split_data = df_copy[source_col].str.split(pattern, n=n_splits-1, expand=True, regex=True)
-            
-            for i, col_name in enumerate(new_cols):
-                if i < split_data.shape[1]:
-                    df_copy[col_name] = split_data[i]
+                    st.warning(f" Impossible de calculer la médiane pour '{col}' (type non numérique)")
+            elif strategy in ['moyenne', 'Moyenne']:
+                if df_copy[col].dtype in ['int64', 'float64']:
+                    mean_val = df_copy[col].mean()
+                    if pd.notna(mean_val):
+                        df_copy[col].fillna(mean_val, inplace=True)
                 else:
-                    df_copy[col_name] = None
-    
-    # Find & Replace avancé
-    elif trans_type == 'find_replace':
-        col = transformation['column']
-        method = transformation['method']
+                    st.warning(f" Impossible de calculer la moyenne pour '{col}' (type non numérique)")
+            elif strategy in ['mode (valeur la plus fréquente)', 'Mode (valeur la plus fréquente)']:
+                mode_series = df_copy[col].mode()
+                if len(mode_series) > 0:
+                    df_copy[col].fillna(mode_series[0], inplace=True)
+            elif strategy == 'Propagation avant (ffill)':
+                df_copy[col].fillna(method='ffill', inplace=True)
+            elif strategy == 'Propagation arrière (bfill)':
+                df_copy[col].fillna(method='bfill', inplace=True)
         
-        if method == 'exact':
-            search = transformation['search']
-            replace = transformation['replace']
-            case_sensitive = transformation.get('case_sensitive', False)
-            df_copy[col] = df_copy[col].str.replace(search, replace, case=case_sensitive, regex=False)
+        # Conversion de types
+        elif trans_type == 'convert_type':
+            col = transformation['column']
             
-        elif method == 'regex':
-            pattern = transformation['pattern']
-            replace = transformation['replace']
-            df_copy[col] = df_copy[col].str.replace(pattern, replace, regex=True)
+            if col not in df_copy.columns:
+                st.warning(f" Colonne '{col}' introuvable, transformation ignorée")
+                return df_copy
             
-        elif method == 'multiple':
-            replacements = transformation['replacements']
-            for r in replacements:
-                df_copy[col] = df_copy[col].str.replace(r['search'], r['replace'], regex=False)
-    
-    # Filtrage de lignes
-    elif trans_type == 'filter_rows':
-        filters = transformation['filters']
+            target_type = transformation['target_type']
+            
+            try:
+                if target_type == 'Entier (int)':
+                    df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(0).astype(int)
+                elif target_type == 'Décimal (float)':
+                    df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce')
+                elif target_type == 'Texte (string)':
+                    df_copy[col] = df_copy[col].astype(str)
+                elif target_type == 'Date (datetime)':
+                    df_copy[col] = pd.to_datetime(df_copy[col], errors='coerce')
+                elif target_type == 'Booléen (bool)':
+                    df_copy[col] = df_copy[col].astype(bool)
+            except Exception as e:
+                st.warning(f" Erreur de conversion pour '{col}' : {str(e)}")
         
-        for f in filters:
-            col = f['column']
-            operator = f['operator']
-            value = f['value']
-            category = f['category']
+        # Suppression doublons
+        elif trans_type == 'drop_duplicates':
+            keep = transformation['keep']
+            keep_map = {'première': 'first', 'dernière': 'last', 'aucune': False}
+            df_copy = df_copy.drop_duplicates(keep=keep_map[keep])
+        
+        # Formatage décimales
+        elif trans_type == 'format_decimals':
+            col = transformation['column']
             
-            # FILTRES NUMÉRIQUES
-            if category == "Numérique":
-                if operator == "Égal à":
-                    df_copy = df_copy[df_copy[col] == value]
-                elif operator == "Différent de":
-                    df_copy = df_copy[df_copy[col] != value]
-                elif operator == "Supérieur à":
-                    df_copy = df_copy[df_copy[col] > value]
-                elif operator == "Inférieur à":
-                    df_copy = df_copy[df_copy[col] < value]
-                elif operator == "Entre":
-                    df_copy = df_copy[(df_copy[col] >= value[0]) & (df_copy[col] <= value[1])]
-                elif operator == "N'est pas entre":
-                    df_copy = df_copy[(df_copy[col] < value[0]) | (df_copy[col] > value[1])]
+            if col not in df_copy.columns:
+                st.warning(f" Colonne '{col}' introuvable, transformation ignorée")
+                return df_copy
             
-            # FILTRES DATES
-            elif category == "Date":
-                if operator == "Avant le":
-                    df_copy = df_copy[df_copy[col] < value]
-                elif operator == "Après le":
-                    df_copy = df_copy[df_copy[col] > value]
-                elif operator == "Égal à":
-                    df_copy = df_copy[df_copy[col].dt.date == value.date()]
-                elif operator == "Entre":
-                    df_copy = df_copy[(df_copy[col] >= value[0]) & (df_copy[col] <= value[1])]
-                elif operator == "N'est pas entre":
-                    df_copy = df_copy[(df_copy[col] < value[0]) | (df_copy[col] > value[1])]
+            decimals = transformation['decimals']
             
-            # FILTRES TEXTE
+            if df_copy[col].dtype in ['int64', 'float64']:
+                df_copy[col] = df_copy[col].round(decimals)
             else:
-                if operator == "Contient":
-                    df_copy = df_copy[df_copy[col].str.contains(str(value), case=False, na=False)]
-                elif operator == "Ne contient pas":
-                    df_copy = df_copy[~df_copy[col].str.contains(str(value), case=False, na=False)]
-                elif operator == "Égal à":
-                    df_copy = df_copy[df_copy[col] == value]
-                elif operator == "Différent de":
-                    df_copy = df_copy[df_copy[col] != value]
-                elif operator == "Commence par":
-                    df_copy = df_copy[df_copy[col].str.startswith(str(value), na=False)]
-                elif operator == "Finit par":
-                    df_copy = df_copy[df_copy[col].str.endswith(str(value), na=False)]
-    
-    return df_copy
+                st.warning(f" Colonne '{col}' n'est pas numérique, formatage ignoré")
+        
+        # Nettoyage texte
+        elif trans_type == 'text_cleaning':
+            col = transformation['column']
+            
+            if col not in df_copy.columns:
+                st.warning(f" Colonne '{col}' introuvable, transformation ignorée")
+                return df_copy
+            
+            operation = transformation['operation']
+            
+            if operation == "Supprimer espaces début/fin (trim)":
+                df_copy[col] = df_copy[col].str.strip()
+            elif operation == "Convertir en minuscules":
+                df_copy[col] = df_copy[col].str.lower()
+            elif operation == "Convertir en majuscules":
+                df_copy[col] = df_copy[col].str.upper()
+            elif operation == "Convertir en title case (Première Lettre Majuscule)":
+                df_copy[col] = df_copy[col].str.title()
+            elif operation == "Remplacer une valeur":
+                replace_from = transformation['replace_from']
+                replace_to = transformation['replace_to']
+                if replace_from and replace_to is not None:
+                    df_copy[col] = df_copy[col].str.replace(replace_from, replace_to, regex=False)
+            elif operation == "Supprimer caractères spéciaux":
+                df_copy[col] = df_copy[col].str.replace(r'[^a-zA-Z0-9\s]', '', regex=True)
+        
+        # Extraction pattern
+        elif trans_type == 'extract_pattern':
+            source_col = transformation['source_column']
+            new_col = transformation['new_column']
+            pattern = transformation['pattern']
+            
+            if source_col not in df_copy.columns:
+                st.warning(f" Colonne '{source_col}' introuvable, transformation ignorée")
+                return df_copy
+            
+            try:
+                if '(' in pattern and ')' in pattern:
+                    df_copy[new_col] = df_copy[source_col].str.extract(pattern, expand=False)
+                else:
+                    df_copy[new_col] = df_copy[source_col].str.extract(f'({pattern})', expand=False)
+            except Exception as e:
+                st.warning(f" Erreur d'extraction regex : {str(e)}")
+        
+        # Split colonnes
+        elif trans_type == 'split_column':
+            source_col = transformation['source_column']
+            new_cols = transformation['new_columns']
+            split_method = transformation['split_method']
+            
+            if source_col not in df_copy.columns:
+                st.warning(f" Colonne '{source_col}' introuvable, transformation ignorée")
+                return df_copy
+            
+            try:
+                if split_method == 'separator':
+                    separator = transformation['separator']
+                    n_splits = transformation['n_splits']
+                    split_data = df_copy[source_col].str.split(separator, n=n_splits-1, expand=True)
+                    
+                    for i, col_name in enumerate(new_cols):
+                        if i < split_data.shape[1]:
+                            df_copy[col_name] = split_data[i]
+                        else:
+                            df_copy[col_name] = None
+                
+                elif split_method == 'position':
+                    position = transformation['position']
+                    df_copy[new_cols[0]] = df_copy[source_col].str[:position]
+                    df_copy[new_cols[1]] = df_copy[source_col].str[position:].str.strip()
+                
+                elif split_method == 'regex':
+                    pattern = transformation['pattern']
+                    n_splits = transformation['n_splits']
+                    split_data = df_copy[source_col].str.split(pattern, n=n_splits-1, expand=True, regex=True)
+                    
+                    for i, col_name in enumerate(new_cols):
+                        if i < split_data.shape[1]:
+                            df_copy[col_name] = split_data[i]
+                        else:
+                            df_copy[col_name] = None
+            except Exception as e:
+                st.warning(f" Erreur de split : {str(e)}")
+        
+        # Find & Replace avancé
+        elif trans_type == 'find_replace':
+            col = transformation['column']
+            
+            if col not in df_copy.columns:
+                st.warning(f" Colonne '{col}' introuvable, transformation ignorée")
+                return df_copy
+            
+            method = transformation['method']
+            
+            try:
+                if method == 'exact':
+                    search = transformation['search']
+                    replace = transformation['replace']
+                    case_sensitive = transformation.get('case_sensitive', False)
+                    df_copy[col] = df_copy[col].str.replace(search, replace, case=case_sensitive, regex=False)
+                    
+                elif method == 'regex':
+                    pattern = transformation['pattern']
+                    replace = transformation['replace']
+                    df_copy[col] = df_copy[col].str.replace(pattern, replace, regex=True)
+                    
+                elif method == 'multiple':
+                    replacements = transformation['replacements']
+                    for r in replacements:
+                        df_copy[col] = df_copy[col].str.replace(r['search'], r['replace'], regex=False)
+            except Exception as e:
+                st.warning(f" Erreur de remplacement : {str(e)}")
+        
+        # Filtrage de lignes
+        elif trans_type == 'filter_rows':
+            filters = transformation['filters']
+            
+            for f in filters:
+                col = f['column']
+                
+                if col not in df_copy.columns:
+                    st.warning(f" Colonne '{col}' introuvable dans le filtre, ignorée")
+                    continue
+                
+                operator = f['operator']
+                value = f['value']
+                category = f['category']
+                
+                try:
+                    # FILTRES NUMÉRIQUES
+                    if category == "Numérique":
+                        if operator == "Égal à":
+                            df_copy = df_copy[df_copy[col] == value]
+                        elif operator == "Différent de":
+                            df_copy = df_copy[df_copy[col] != value]
+                        elif operator == "Supérieur à":
+                            df_copy = df_copy[df_copy[col] > value]
+                        elif operator == "Inférieur à":
+                            df_copy = df_copy[df_copy[col] < value]
+                        elif operator == "Entre":
+                            df_copy = df_copy[(df_copy[col] >= value[0]) & (df_copy[col] <= value[1])]
+                        elif operator == "N'est pas entre":
+                            df_copy = df_copy[(df_copy[col] < value[0]) | (df_copy[col] > value[1])]
+                    
+                    # FILTRES DATES
+                    elif category == "Date":
+                        if operator == "Avant le":
+                            df_copy = df_copy[df_copy[col] < value]
+                        elif operator == "Après le":
+                            df_copy = df_copy[df_copy[col] > value]
+                        elif operator == "Égal à":
+                            df_copy = df_copy[df_copy[col].dt.date == value.date()]
+                        elif operator == "Entre":
+                            df_copy = df_copy[(df_copy[col] >= value[0]) & (df_copy[col] <= value[1])]
+                        elif operator == "N'est pas entre":
+                            df_copy = df_copy[(df_copy[col] < value[0]) | (df_copy[col] > value[1])]
+                    
+                    # FILTRES TEXTE
+                    else:
+                        if operator == "Contient":
+                            df_copy = df_copy[df_copy[col].str.contains(str(value), case=False, na=False)]
+                        elif operator == "Ne contient pas":
+                            df_copy = df_copy[~df_copy[col].str.contains(str(value), case=False, na=False)]
+                        elif operator == "Égal à":
+                            df_copy = df_copy[df_copy[col] == value]
+                        elif operator == "Différent de":
+                            df_copy = df_copy[df_copy[col] != value]
+                        elif operator == "Commence par":
+                            df_copy = df_copy[df_copy[col].str.startswith(str(value), na=False)]
+                        elif operator == "Finit par":
+                            df_copy = df_copy[df_copy[col].str.endswith(str(value), na=False)]
+                except Exception as e:
+                    st.warning(f" Erreur lors du filtrage sur '{col}' : {str(e)}")
+        
+        return df_copy
+        
+    except Exception as e:
+        st.error(f" Erreur lors de la transformation : {str(e)}")
+        st.info(" La transformation a été ignorée, données conservées")
+        return df_copy
 
 
 def generate_python_code(transformations, original_filename):
